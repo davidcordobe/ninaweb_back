@@ -12,10 +12,12 @@ const app = express();
 // ===== Configuración =====
 const PORT = process.env.PORT || 5001;
 const JWT_SECRET = process.env.JWT_SECRET || 'Creativa2026'; // Default si no está en .env
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin'; // Default si no está en .env
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Tomas271217'; // Default si no está en .env
 const MAX_FILE_SIZE = 10485760; // 10MB
 
 console.log(`✅ JWT_SECRET configurado: ${JWT_SECRET ? 'Sí' : 'No'}`);
+console.log(`✅ ADMIN_USERNAME configurado: ${ADMIN_USERNAME ? 'Sí' : 'No'}`);
 console.log(`✅ ADMIN_PASSWORD configurado: ${ADMIN_PASSWORD ? 'Sí' : 'No'}`);
 
 // ===== Carpetas de almacenamiento =====
@@ -161,16 +163,16 @@ const authenticateToken = (req, res, next) => {
 // Login
 app.post('/api/auth/login', (req, res) => {
     try {
-        const { password } = req.body;
+        const { username, password } = req.body;
 
-        if (!password) {
-            return res.status(400).json({ error: 'Contraseña requerida' });
+        if (!username || !password) {
+            return res.status(400).json({ error: 'Usuario y contraseña requeridos' });
         }
 
-        if (password === ADMIN_PASSWORD) {
-            console.log('✅ Contraseña correcta, generando token...');
+        if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+            console.log('✅ Credenciales correctas, generando token...');
             const token = jwt.sign(
-                { role: 'admin', timestamp: Date.now() },
+                { role: 'admin', username, timestamp: Date.now() },
                 JWT_SECRET,
                 { expiresIn: '24h' }
             );
@@ -182,8 +184,8 @@ app.post('/api/auth/login', (req, res) => {
                 message: 'Login exitoso'
             });
         } else {
-            console.error('❌ Contraseña incorrecta');
-            res.status(401).json({ error: 'Contraseña incorrecta' });
+            console.error('❌ Usuario o contraseña incorrectos');
+            res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
         }
     } catch (error) {
         console.error('Error en login:', error);

@@ -1,6 +1,6 @@
 // ===== Configuración del cliente API =====
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 let authToken = localStorage.getItem('adminToken');
 
 // ===== Función auxiliar para peticiones =====
@@ -47,9 +47,9 @@ async function apiCall(endpoint, method = 'GET', data = null, requiresAuth = fal
 
 // ===== Autenticación =====
 
-async function login(password) {
+async function login(username, password) {
     try {
-        const response = await apiCall('/auth/login', 'POST', { password });
+        const response = await apiCall('/auth/login', 'POST', { username, password });
         authToken = response.token;
         localStorage.setItem('adminToken', authToken);
         return response;
