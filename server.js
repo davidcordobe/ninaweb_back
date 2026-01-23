@@ -11,10 +11,12 @@ const app = express();
 
 // ===== Configuración =====
 const PORT = process.env.PORT || 5001;
-const JWT_SECRET = process.env.JWT_SECRET || 'Creativa2026'; // Default si no está en .env
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin'; // Default si no está en .env
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Tomas271217'; // Default si no está en .env
+const JWT_SECRET = process.env.JWT_SECRET; // Default si no está en .env
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME; // Default si no está en .env
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD; // Default si no está en .env
 const MAX_FILE_SIZE = 10485760; // 10MB
+const MAX_VIDEO_SIZE = 209715200; // 200MB
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL; // Opcional para producción
 
 console.log(`✅ JWT_SECRET configurado: ${JWT_SECRET ? 'Sí' : 'No'}`);
 console.log(`✅ ADMIN_USERNAME configurado: ${ADMIN_USERNAME ? 'Sí' : 'No'}`);
@@ -22,13 +24,25 @@ console.log(`✅ ADMIN_PASSWORD configurado: ${ADMIN_PASSWORD ? 'Sí' : 'No'}`);
 
 // ===== Carpetas de almacenamiento =====
 const uploadDir = path.join(__dirname, 'uploads');
+const videoUploadDir = path.join(uploadDir, 'videos');
 const dataDir = path.join(__dirname, 'data');
 
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
+if (!fs.existsSync(videoUploadDir)) {
+    fs.mkdirSync(videoUploadDir, { recursive: true });
+}
 if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
+}
+
+// Base URL para recursos públicos (imágenes/videos)
+function getPublicBaseUrl(req) {
+    if (PUBLIC_BASE_URL) return PUBLIC_BASE_URL.replace(/\/$/, '');
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    return `${proto}://${host}`;
 }
 
 // ===== Archivo de datos JSON =====
@@ -134,6 +148,29 @@ const upload = multer({
     }
 });
 
+// Multer para videos (sin compresión)
+const videoStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, videoUploadDir);
+    },
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, uniqueSuffix + path.extname(file.originalname));
+    }
+});
+
+const uploadVideo = multer({
+    storage: videoStorage,
+    limits: { fileSize: MAX_VIDEO_SIZE },
+    fileFilter: (req, file, cb) => {
+        const allowedVideoMimes = ['video/mp4', 'video/quicktime', 'video/webm'];
+        if (allowedVideoMimes.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Tipo de video no permitido'));
+        }
+    }
+});
 
 // ===== Middleware de autenticación =====
 const authenticateToken = (req, res, next) => {
@@ -233,7 +270,8 @@ app.post('/api/services/upload', authenticateToken, upload.single('image'), asyn
         }
 
         const stats = fs.statSync(outputPath);
-        const url = `http://localhost:${PORT}/uploads/compressed-${filename}`;
+        const baseUrl = getPublicBaseUrl(req);
+        const url = `${baseUrl}/uploads/compressed-${filename}`;
 
         console.log(`✅ Imagen comprimida: compressed-${filename} (${stats.size} bytes)`);
 
@@ -260,13 +298,90 @@ app.post('/api/services/upload', authenticateToken, upload.single('image'), asyn
     }
 });
 
+// ===== Rutas de portafolio (videos) =====
+
+// Subir video de portafolio
+app.post('/api/portfolio/upload-video', authenticateToken, uploadVideo.single('video'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No se envió video' });
+        }
+
+        const filename = req.file.filename;
+        const filepath = path.join(videoUploadDir, filename);
+        const stats = fs.statSync(filepath);
+        const baseUrl = getPublicBaseUrl(req);
+        const url = `${baseUrl}/uploads/videos/${filename}`;
+
+        console.log(`🎬 Video subido: ${filename} (${stats.size} bytes)`);
+
+        res.json({
+            success: true,
+            filename,
+            url,
+            size: stats.size,
+            message: 'Video subido exitosamente'
+        });
+    } catch (error) {
+        console.error('❌ Error al subir video:', error.message);
+        try {
+            if (req.file && fs.existsSync(req.file.path)) {
+                fs.unlinkSync(req.file.path);
+            }
+        } catch (e) {
+            console.warn('No se pudo limpiar video subido:', e.message);
+        }
+        res.status(500).json({ error: error.message || 'Error al subir el video' });
+    }
+});
+
+// Listar videos de portafolio
+app.get('/api/portfolio/videos', authenticateToken, (req, res) => {
+    try {
+        const baseUrl = getPublicBaseUrl(req);
+        const files = fs.readdirSync(videoUploadDir);
+        const videos = files.map(file => ({
+            filename: file,
+            url: `${baseUrl}/uploads/videos/${file}`,
+            size: fs.statSync(path.join(videoUploadDir, file)).size
+        }));
+        res.json({ videos });
+    } catch (error) {
+        console.error('Error obteniendo videos:', error.message);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Eliminar video de portafolio
+app.delete('/api/portfolio/videos/:filename', authenticateToken, (req, res) => {
+    try {
+        const filename = req.params.filename;
+        const filepath = path.join(videoUploadDir, filename);
+
+        if (!path.resolve(filepath).startsWith(path.resolve(videoUploadDir))) {
+            return res.status(400).json({ error: 'Acceso denegado' });
+        }
+
+        if (!fs.existsSync(filepath)) {
+            return res.status(404).json({ error: 'Archivo no encontrado' });
+        }
+
+        fs.unlinkSync(filepath);
+        res.json({ success: true, message: 'Video eliminado' });
+    } catch (error) {
+        console.error('Error eliminando video:', error.message);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Obtener lista de imágenes
 app.get('/api/services/images', authenticateToken, (req, res) => {
     try {
+        const baseUrl = getPublicBaseUrl(req);
         const files = fs.readdirSync(uploadDir);
         const images = files.map(file => ({
             filename: file,
-            url: `http://localhost:5001/uploads/${file}`,
+            url: `${baseUrl}/uploads/${file}`,
             size: fs.statSync(path.join(uploadDir, file)).size
         }));
 
