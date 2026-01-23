@@ -46,6 +46,7 @@ function loadPageData() {
     return {
         hero: { title: 'Nina Multipotencial', subtitle: 'Creadora de contenido UGC' },
         about: { title: 'Acerca de', content: '' },
+        portfolio: [],
         services: [],
         testimonials: [],
         contact: { email: '', phone: '', linkedin: '' }
