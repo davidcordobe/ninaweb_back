@@ -24,6 +24,14 @@ const serviceSchema = new mongoose.Schema({
         type: String,
         default: '200px'
     },
+    learnMoreLink: {
+        type: String,
+        default: ''
+    },
+    purchaseLink: {
+        type: String,
+        default: ''
+    },
     active: {
         type: Boolean,
         default: true
