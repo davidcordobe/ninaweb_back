@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
 
+const Mixed = mongoose.Schema.Types.Mixed;
+
 // ===== Schema de Servicios =====
 const serviceSchema = new mongoose.Schema({
     title: {
@@ -17,6 +19,10 @@ const serviceSchema = new mongoose.Schema({
     imageFilename: {
         type: String, // Nombre del archivo en servidor
         default: null
+    },
+    imageSize: {
+        type: String,
+        default: '200px'
     },
     active: {
         type: Boolean,
@@ -44,6 +50,19 @@ const pageDataSchema = new mongoose.Schema({
         text2: String,
         features: [String]
     },
+    portfolioPage: {
+        eyebrow: String,
+        heroTitle: String,
+        sectionTitle: String
+    },
+    portfolioIntro: String,
+    portfolio: [{
+        title: String,
+        description: String,
+        videoUrl: String,
+        poster: String,
+        active: { type: Boolean, default: true }
+    }],
     services: [serviceSchema],
     testimonials: [{
         name: String,
@@ -58,6 +77,8 @@ const pageDataSchema = new mongoose.Schema({
         tiktok: String,
         linkedin: String
     },
+    colors: Mixed,
+    typography: Mixed,
     createdAt: {
         type: Date,
         default: Date.now

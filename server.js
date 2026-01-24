@@ -6,6 +6,9 @@ const multer = require('multer');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const sharp = require('sharp');
+const mongoose = require('mongoose');
+
+const { PageData } = require('./models');
 
 const app = express();
 
@@ -16,10 +19,12 @@ const ADMIN_USERNAME = process.env.ADMIN_USERNAME; // Default si no está en .en
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD; // Default si no está en .env
 const MAX_FILE_SIZE = 10485760; // 10MB
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL; // Opcional si se usa dominio
+const MONGO_URI = process.env.MONGO_URI;
 
 console.log(`✅ JWT_SECRET configurado: ${JWT_SECRET ? 'Sí' : 'No'}`);
 console.log(`✅ ADMIN_USERNAME configurado: ${ADMIN_USERNAME ? 'Sí' : 'No'}`);
 console.log(`✅ ADMIN_PASSWORD configurado: ${ADMIN_PASSWORD ? 'Sí' : 'No'}`);
+console.log(`✅ MONGO_URI configurado: ${MONGO_URI ? 'Sí' : 'No'}`);
 
 // ===== Carpetas de almacenamiento =====
 const uploadDir = path.join(__dirname, 'uploads');
@@ -40,43 +45,107 @@ function getPublicBaseUrl(req) {
     return `${proto}://${host}`;
 }
 
-// ===== Archivo de datos JSON =====
-const pageDataFile = path.join(dataDir, 'page-data.json');
-
-// Cargar datos iniciales
-function loadPageData() {
-    try {
-        if (fs.existsSync(pageDataFile)) {
-            return JSON.parse(fs.readFileSync(pageDataFile, 'utf8'));
-        }
-    } catch (error) {
-        console.error('Error cargando datos:', error.message);
+// ===== Datos por defecto =====
+const defaultPageData = {
+    hero: { title: 'Nina Multipotencial', subtitle: 'Creadora de contenido UGC & Edición de Video Profesional', description: 'Transformo ideas en contenido visual impactante...' },
+    about: { text1: '', text2: '', features: [] },
+    portfolioPage: {
+        eyebrow: 'Seleccion de trabajos',
+        heroTitle: 'Portafolio en video',
+        sectionTitle: 'Reel de proyectos'
+    },
+    portfolioIntro: '',
+    services: [],
+    portfolio: [],
+    testimonials: [],
+    contact: { whatsapp: '', email: '', instagram: '', tiktok: '', linkedin: '' },
+    colors: {
+        primary: '#667eea',
+        primaryDark: '#764ba2',
+        accent: '#25d366',
+        textDark: '#1a1a1a',
+        textLight: '#666',
+        bgLight: '#f5f7fa',
+        bgWhite: '#ffffff',
+        contactBg: '#ffffff',
+        bgCard: '#ffffff',
+        borderColor: '#e0e0e0',
+        inputBg: '#ffffff',
+        inputBorder: '#ddd',
+        navbarBg: 'rgba(255,255,255,0.95)',
+        navbarText: '#1a1a1a'
+    },
+    typography: {
+        primaryFont: "'Poppins', sans-serif",
+        h1Size: '48px',
+        h2Size: '32px',
+        bodySize: '16px',
+        fontWeight: '400',
+        lineHeight: '1.6'
     }
+};
+
+function mergeDefaults(data = {}) {
     return {
-        hero: { title: 'Nina Multipotencial', subtitle: 'Creadora de contenido UGC' },
-        about: { title: 'Acerca de', content: '' },
-        portfolioPage: {
-            eyebrow: 'Seleccion de trabajos',
-            heroTitle: 'Portafolio en video',
-            sectionTitle: 'Reel de proyectos'
-        },
-        portfolioIntro: '',
-        portfolio: [],
-        services: [],
-        testimonials: [],
-        contact: { email: '', phone: '', linkedin: '' }
+        ...defaultPageData,
+        ...data,
+        hero: { ...defaultPageData.hero, ...(data.hero || {}) },
+        about: { ...defaultPageData.about, ...(data.about || {}) },
+        portfolioPage: { ...defaultPageData.portfolioPage, ...(data.portfolioPage || {}) },
+        contact: { ...defaultPageData.contact, ...(data.contact || {}) },
+        colors: { ...defaultPageData.colors, ...(data.colors || {}) },
+        typography: { ...defaultPageData.typography, ...(data.typography || {}) },
+        services: Array.isArray(data.services) ? data.services : [],
+        portfolio: Array.isArray(data.portfolio) ? data.portfolio : [],
+        testimonials: Array.isArray(data.testimonials) ? data.testimonials : []
     };
 }
 
-// Guardar datos
-function savePageData(data) {
-    try {
-        fs.writeFileSync(pageDataFile, JSON.stringify(data, null, 2), 'utf8');
-        return true;
-    } catch (error) {
-        console.error('Error guardando datos:', error.message);
-        return false;
+// ===== Conexión a MongoDB =====
+if (!MONGO_URI) {
+    console.error('❌ MONGO_URI no está configurado. Define la variable de entorno para usar Mongo Atlas.');
+} else {
+    mongoose.connect(MONGO_URI, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true
+    }).then(() => {
+        console.log('✅ Conectado a MongoDB Atlas');
+    }).catch(err => {
+        console.error('❌ Error conectando a MongoDB:', err.message);
+        process.exit(1);
+    });
+}
+
+async function getOrCreatePageData() {
+    if (!MONGO_URI) {
+        throw new Error('MONGO_URI no configurado');
     }
+    let doc = await PageData.findOne();
+    if (!doc) {
+        doc = new PageData(defaultPageData);
+        await doc.save();
+        return doc.toObject();
+    }
+
+    const merged = mergeDefaults(doc.toObject());
+    doc.set(merged);
+    await doc.save();
+    return merged;
+}
+
+async function savePageDataMongo(payload) {
+    if (!MONGO_URI) {
+        throw new Error('MONGO_URI no configurado');
+    }
+    const merged = mergeDefaults(payload);
+    let doc = await PageData.findOne();
+    if (!doc) {
+        doc = new PageData(merged);
+    } else {
+        doc.set(merged);
+    }
+    await doc.save();
+    return merged;
 }
 
 // ===== Middleware =====
@@ -323,9 +392,9 @@ app.delete('/api/services/images/:filename', authenticateToken, (req, res) => {
 // ===== Rutas de contenido (datos de la página) =====
 
 // Obtener datos de la página (sin autenticación para lectura pública)
-app.get('/api/content/page-data', (req, res) => {
+app.get('/api/content/page-data', async (req, res) => {
     try {
-        const data = loadPageData();
+        const data = await getOrCreatePageData();
         res.json(data);
     } catch (error) {
         console.error('Error obteniendo datos:', error);
@@ -334,9 +403,9 @@ app.get('/api/content/page-data', (req, res) => {
 });
 
 // Ruta alternativa sin /api para compatibilidad
-app.get('/content/page-data', (req, res) => {
+app.get('/content/page-data', async (req, res) => {
     try {
-        const data = loadPageData();
+        const data = await getOrCreatePageData();
         res.json(data);
     } catch (error) {
         console.error('Error obteniendo datos:', error);
@@ -345,7 +414,7 @@ app.get('/content/page-data', (req, res) => {
 });
 
 // Guardar datos de página
-app.post('/api/content/page-data', authenticateToken, (req, res) => {
+app.post('/api/content/page-data', authenticateToken, async (req, res) => {
     try {
         const data = req.body;
 
@@ -353,13 +422,8 @@ app.post('/api/content/page-data', authenticateToken, (req, res) => {
             return res.status(400).json({ error: 'Datos inválidos' });
         }
 
-        const saved = savePageData(data);
-
-        if (saved) {
-            res.json({ success: true, message: 'Datos guardados', data });
-        } else {
-            res.status(500).json({ error: 'Error al guardar datos' });
-        }
+        const saved = await savePageDataMongo(data);
+        res.json({ success: true, message: 'Datos guardados', data: saved });
     } catch (error) {
         console.error('Error guardando datos:', error);
         res.status(500).json({ error: error.message });
